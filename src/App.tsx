@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { 
   Search, Music, Heart, ListMusic, Download, Plus, Trash2, 
   Database, Globe, Star, Play, Pause, Volume2, X, ChevronRight, 
-  Info, History, Sparkles, PlusCircle, Check, ListPlus, ExternalLink
+  Info, History, Sparkles, PlusCircle, Check, ListPlus, ExternalLink, FileText
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Album, Playlist, DownloadItem } from "./types";
@@ -35,6 +35,8 @@ export default function App() {
   const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null);
   const [loadingAlbumDetails, setLoadingAlbumDetails] = useState(false);
   const [albumDetailError, setAlbumDetailError] = useState<string | null>(null);
+  const [albumFiles, setAlbumFiles] = useState<any[]>([]);
+  const [loadingFiles, setLoadingFiles] = useState(false);
 
   // Simulated Player state
   const [activeTrack, setActiveTrack] = useState<{ title: string; artist: string; albumId: string } | null>(null);
@@ -285,6 +287,14 @@ export default function App() {
 
     // If it's a live album, fetch details from proxy with timeout
     setLoadingAlbumDetails(true);
+    
+    // Also fetch files from bunkr if this is a bunkr URL
+    if (album.id.includes("bunkr.cr") || album.id.includes("bunkr.su")) {
+      fetchAlbumFiles(album.id);
+    } else {
+      setAlbumFiles([]);
+    }
+    
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 6000);
@@ -360,6 +370,25 @@ export default function App() {
       });
     } finally {
       setLoadingAlbumDetails(false);
+    }
+  };
+
+  // Fetch files from bunkr album
+  const fetchAlbumFiles = async (albumUrl: string) => {
+    setLoadingFiles(true);
+    try {
+      const response = await fetch(`/api/files?url=${encodeURIComponent(albumUrl)}`);
+      const data = await response.json();
+      
+      if (data.success && data.files) {
+        setAlbumFiles(data.files);
+      } else {
+        setAlbumFiles([]);
+      }
+    } catch (err) {
+      setAlbumFiles([]);
+    } finally {
+      setLoadingFiles(false);
     }
   };
 
@@ -1344,6 +1373,63 @@ export default function App() {
                         )}
                       </div>
                     </div>
+
+                    {/* Bunkr Files Download Box */}
+                    {albumFiles.length > 0 && (
+                      <div className="bg-[#0d1117] p-5 rounded-2xl border border-gray-800 space-y-3.5">
+                        <h4 className="text-xs font-extrabold text-white uppercase tracking-wider flex items-center">
+                          <FileText className="w-4 h-4 text-blue-400 mr-1.5" />
+                          Arquivos do Álbum ({albumFiles.length})
+                        </h4>
+                        <p className="text-xxs text-gray-500 leading-relaxed">
+                          Clique em qualquer arquivo para fazer download direto do repositório Bunkr.
+                        </p>
+
+                        <div className="space-y-2">
+                          <button 
+                            onClick={() => {
+                              albumFiles.forEach((file, index) => {
+                                setTimeout(() => {
+                                  const link = document.createElement('a');
+                                  link.href = file.fullUrl;
+                                  link.target = '_blank';
+                                  link.click();
+                                }, index * 200);
+                              });
+                            }}
+                            className="w-full bg-blue-600/10 hover:bg-blue-600 border border-blue-900/40 hover:border-transparent text-blue-400 hover:text-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center justify-between transition-all"
+                          >
+                            <span>Abrir Todos ({albumFiles.length})</span>
+                            <Download className="w-3.5 h-3.5 opacity-70" />
+                          </button>
+                        </div>
+
+                        {/* File list */}
+                        <div className="max-h-40 overflow-y-auto space-y-1.5 border-t border-gray-700 pt-3">
+                          {albumFiles.map((file, idx) => (
+                            <a 
+                              key={idx}
+                              href={file.fullUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block p-2.5 bg-gray-900/50 hover:bg-blue-950/40 border border-gray-700 hover:border-blue-700 rounded-lg transition-all group"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs text-gray-300 group-hover:text-blue-300 truncate font-mono">
+                                    {file.name}
+                                  </p>
+                                  <p className="text-xxs text-gray-500 group-hover:text-gray-400">
+                                    {file.size}
+                                  </p>
+                                </div>
+                                <ExternalLink className="w-3 h-3 text-gray-500 group-hover:text-blue-400 flex-shrink-0 mt-0.5" />
+                              </div>
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Personal Notes / Persistent Reviews */}
                     <div className="bg-gray-900/60 p-5 rounded-2xl border border-gray-800 space-y-4">

@@ -277,6 +277,92 @@ app.get("/api/album", async (req, res) => {
 });
 
 // Helper: Decode basic HTML entities
+// API: Get files list from bunkr album
+app.get("/api/files", async (req, res) => {
+  const albumUrl = req.query.url as string;
+  if (!albumUrl || albumUrl.trim().length === 0) {
+    return res.status(400).json({ 
+      error: "Missing or empty 'url' parameter",
+      success: false,
+      files: []
+    });
+  }
+
+  const cleanUrl = albumUrl.trim();
+  
+  // Security check
+  if (!cleanUrl.includes("bunkr.cr") && !cleanUrl.includes("bunkr.su") && !cleanUrl.includes("balbums.st")) {
+    return res.status(400).json({ 
+      error: "Invalid domain. Only bunkr/balbums domains are supported.",
+      success: false,
+      files: []
+    });
+  }
+
+  try {
+    const response = await fetch(cleanUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Referer": "https://bunkr.cr/"
+      },
+      signal: AbortSignal.timeout(10000)
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const html = await response.text();
+    
+    if (!html || html.length === 0) {
+      throw new Error("Empty response body");
+    }
+
+    // Parse files from HTML - procura por links /f/XXXXX com aria-label="download"
+    const files: any[] = [];
+    const fileRegex = /<a\s+[^>]*href="\/f\/([^"]+)"[^>]*aria-label="download"[^>]*><\/a>/gi;
+    let match;
+    const seenIds = new Set<string>();
+
+    while ((match = fileRegex.exec(html)) !== null && files.length < 100) {
+      const fileId = match[1];
+      
+      if (seenIds.has(fileId)) continue;
+      seenIds.add(fileId);
+      
+      // Procurar o nome do arquivo próximo ao fileId
+      // Padrão: <p class="truncate theName">FILENAME</p> ou similar
+      const nameRegex = new RegExp(`<p[^>]*class="[^"]*theName[^"]*"[^>]*>([^<]+)<\\/p>`, 'i');
+      const nameMatch = html.match(nameRegex);
+      
+      // Procurar pelo tamanho
+      const sizeRegex = new RegExp(`<p[^>]*class="[^"]*theSize[^"]*"[^>]*>([^<]+)<\\/p>`, 'i');
+      const sizeMatch = html.match(sizeRegex);
+
+      files.push({
+        id: fileId,
+        name: nameMatch ? decodeHtmlEntities(nameMatch[1].trim()) : `File_${fileId}`,
+        size: sizeMatch ? sizeMatch[1].trim() : "Unknown",
+        url: `/f/${fileId}`,
+        fullUrl: `${new URL(cleanUrl).origin}/f/${fileId}`
+      });
+    }
+
+    return res.json({
+      success: true,
+      fileCount: files.length,
+      files: files
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err.message || "Failed to fetch files from bunkr album",
+      files: []
+    });
+  }
+});
+
 function decodeHtmlEntities(str: string): string {
   return str
     .replace(/&amp;/g, "&")
@@ -348,6 +434,15 @@ async function startServer() {
       server: { middlewareMode: true },
       appType: "spa",
     });
+    
+    // Middleware para permitir APIs passarem antes do Vite
+    app.use((req, res, next) => {
+      if (req.path.startsWith("/api/")) {
+        return next();
+      }
+      next();
+    });
+    
     app.use(vite.middlewares);
   }
 
