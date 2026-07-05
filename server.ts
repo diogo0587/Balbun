@@ -13,15 +13,20 @@ app.use(express.json());
 // API: Search on balbums.st via server proxy
 app.get("/api/search", async (req, res) => {
   const query = req.query.q as string;
-  if (!query) {
-    return res.status(400).json({ error: "Missing query parameter 'q'" });
+  if (!query || query.trim().length === 0) {
+    return res.status(400).json({ 
+      error: "Missing or empty query parameter 'q'",
+      success: false,
+      results: []
+    });
   }
 
-  console.log(`[Proxy Search] Querying balbums.st for: "${query}"`);
+  const cleanQuery = query.trim();
+  console.log(`[Proxy Search] Querying balbums.st for: "${cleanQuery}"`);
   
   try {
     // Attempt to fetch from balbums.st
-    const searchUrl = `https://balbums.st/?s=${encodeURIComponent(query)}`;
+    const searchUrl = `https://balbums.st/?s=${encodeURIComponent(cleanQuery)}`;
     
     const response = await fetch(searchUrl, {
       headers: {
@@ -38,6 +43,10 @@ app.get("/api/search", async (req, res) => {
     }
 
     const html = await response.text();
+    
+    if (!html || html.length === 0) {
+      throw new Error("Empty response body");
+    }
     
     // Check if Cloudflare block is present
     if (html.includes("cf-challenge") || html.includes("Cloudflare") || html.includes("Just a moment...")) {
@@ -149,19 +158,26 @@ app.get("/api/search", async (req, res) => {
 // API: Get single album detail from balbums.st via server proxy
 app.get("/api/album", async (req, res) => {
   const albumUrl = req.query.url as string;
-  if (!albumUrl) {
-    return res.status(400).json({ error: "Missing 'url' parameter" });
+  if (!albumUrl || albumUrl.trim().length === 0) {
+    return res.status(400).json({ 
+      error: "Missing or empty 'url' parameter",
+      success: false 
+    });
   }
 
   // Security check: only allow proxying balbums.st urls
-  if (!albumUrl.startsWith("https://balbums.st/") && !albumUrl.startsWith("http://balbums.st/")) {
-    return res.status(400).json({ error: "Invalid domain. Only balbums.st is supported." });
+  const cleanUrl = albumUrl.trim();
+  if (!cleanUrl.startsWith("https://balbums.st/") && !cleanUrl.startsWith("http://balbums.st/")) {
+    return res.status(400).json({ 
+      error: "Invalid domain. Only balbums.st is supported.",
+      success: false 
+    });
   }
 
-  console.log(`[Proxy Album] Fetching detail for: ${albumUrl}`);
+  console.log(`[Proxy Album] Fetching detail for: ${cleanUrl}`);
 
   try {
-    const response = await fetch(albumUrl, {
+    const response = await fetch(cleanUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",

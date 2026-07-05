@@ -175,22 +175,31 @@ export default function App() {
     }
 
     if (searchSource === "local") {
-      // Local Search logic
-      setTimeout(() => {
-        const localCatalog = getFullLocalCatalog();
-        const results = localCatalog.filter(
-          album => 
-            album.title.toLowerCase().includes(query.toLowerCase()) ||
-            album.artist.toLowerCase().includes(query.toLowerCase()) ||
-            (album.genre && album.genre.toLowerCase().includes(query.toLowerCase()))
-        );
-        setSearchResults(results);
-        setIsSearching(false);
-      }, 300);
+      // Local Search logic - faster, instant results
+      const localCatalog = getFullLocalCatalog();
+      const results = localCatalog.filter(
+        album => 
+          album.title.toLowerCase().includes(query.toLowerCase()) ||
+          album.artist.toLowerCase().includes(query.toLowerCase()) ||
+          (album.genre && album.genre.toLowerCase().includes(query.toLowerCase()))
+      );
+      setSearchResults(results);
+      setIsSearching(false);
     } else {
-      // Live Proxy Search logic
+      // Live Proxy Search logic with improved timeout handling
       try {
-        const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        
+        const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`, {
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
         const data = await response.json();
 
         if (data.success && data.results && data.results.length > 0) {
@@ -209,7 +218,7 @@ export default function App() {
           setSearchResults(mappedResults);
         } else if (data.error === "cloudflare_detected" || !data.success) {
           // Fallback to local catalog and warn user
-          console.warn("Proxy fallback triggered:", data.message);
+          console.warn("[v0] Proxy fallback triggered:", data.message);
           const localCatalog = getFullLocalCatalog();
           const localFiltered = localCatalog.filter(
             album => 
@@ -222,10 +231,11 @@ export default function App() {
           );
         } else {
           setSearchResults([]);
+          setSearchError("Nenhum resultado encontrado para sua busca.");
         }
-      } catch (err) {
-        console.error("Erro na busca via proxy:", err);
-        // Failover
+      } catch (err: any) {
+        console.error("[v0] Erro na busca via proxy:", err.message);
+        // Failover to local search
         const localCatalog = getFullLocalCatalog();
         const localFiltered = localCatalog.filter(
           album => 
@@ -233,7 +243,11 @@ export default function App() {
             album.artist.toLowerCase().includes(query.toLowerCase())
         );
         setSearchResults(localFiltered);
-        setSearchError("Erro de conexão. Ativado modo de busca local inteligente!");
+        setSearchError(
+          err.name === "AbortError" 
+            ? "Tempo limite excedido. Ativado modo de busca local inteligente!"
+            : "Erro de conexão. Ativado modo de busca local inteligente!"
+        );
       } finally {
         setIsSearching(false);
       }
@@ -251,7 +265,6 @@ export default function App() {
   // Handle detailed album selection and fetch full tracks/links if live
   const handleSelectAlbum = async (album: Album) => {
     setSelectedAlbum(album);
-    setLoadingAlbumDetails(true);
     setAlbumDetailError(null);
 
     // Initialize rating/notes state for this album
@@ -264,20 +277,32 @@ export default function App() {
       setCurrentNotes("");
     }
 
-    // If it's a local album, it already has tracks and links
-    if (album.id.startsWith("local-") || album.isCustom) {
+    // If it's a local album or custom, it already has full data
+    if (album.id.startsWith("local-") || album.id.startsWith("custom-") || album.isCustom) {
       setLoadingAlbumDetails(false);
       return;
     }
 
-    // If it's a live album, fetch details from proxy
+    // If it's a live album, fetch details from proxy with timeout
+    setLoadingAlbumDetails(true);
     try {
-      const response = await fetch(`/api/album?url=${encodeURIComponent(album.id)}`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      
+      const response = await fetch(`/api/album?url=${encodeURIComponent(album.id)}`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
       const data = await response.json();
 
       if (data.success && data.album) {
         setSelectedAlbum((prev) => {
-          if (!prev) return null;
+          if (!prev || prev.id !== album.id) return prev; // Prevent race conditions
           return {
             ...prev,
             title: data.album.title || prev.title,
@@ -285,45 +310,50 @@ export default function App() {
             description: data.album.description || prev.excerpt,
             tracks: data.album.tracks || [],
             downloadLinks: data.album.downloadLinks || [],
-            genre: data.album.genre || "Rock / Metal",
-            year: data.album.year || "N/A"
+            genre: data.album.genre || prev.genre || "Rock / Metal",
+            year: data.album.year || prev.year || "N/A"
           };
         });
       } else {
         setAlbumDetailError(data.message || "O site balbums.st bloqueou a conexão. Gerando faixas demonstrativas para este álbum!");
-        // Mock some tracks so it works beautifully anyway
+        // Mock some tracks as fallback
         setSelectedAlbum((prev) => {
           if (!prev) return null;
           return {
             ...prev,
-            tracks: [
+            tracks: prev.tracks && prev.tracks.length > 0 ? prev.tracks : [
               `01. ${prev.title} - Intro`,
               `02. Dawn of the Fire`,
               `03. Echoes of the Past`,
               `04. Sonic Pulse`,
               `05. Outro / Finale`
             ],
-            downloadLinks: [
+            downloadLinks: prev.downloadLinks && prev.downloadLinks.length > 0 ? prev.downloadLinks : [
               { label: "MEGA (Simulado)", url: "https://mega.nz/" },
               { label: "Mediafire (Simulado)", url: "https://mediafire.com/" }
             ]
           };
         });
       }
-    } catch (err) {
-      console.error("Erro ao obter detalhes do álbum:", err);
-      setAlbumDetailError("Erro ao conectar com o site balbums.st. Criando faixas simuladas!");
+    } catch (err: any) {
+      console.error("[v0] Erro ao obter detalhes do álbum:", err.message);
+      setAlbumDetailError(
+        err.name === "AbortError"
+          ? "Tempo limite excedido. Criando faixas simuladas!"
+          : "Erro ao conectar com o site balbums.st. Criando faixas simuladas!"
+      );
+      // Use fallback tracks
       setSelectedAlbum((prev) => {
         if (!prev) return null;
         return {
           ...prev,
-          tracks: [
+          tracks: prev.tracks && prev.tracks.length > 0 ? prev.tracks : [
             "01. Intro",
             "02. Stormbringer",
             "03. Silent Tears",
             "04. Legacy of Fire"
           ],
-          downloadLinks: [
+          downloadLinks: prev.downloadLinks && prev.downloadLinks.length > 0 ? prev.downloadLinks : [
             { label: "Download Alternativo", url: "https://mega.nz/" }
           ]
         };
@@ -344,15 +374,23 @@ export default function App() {
     }
   };
 
-  // Simulated Track Playback
+  // Simulated Track Playback with improved UX
   const handlePlayTrack = (trackName: string, album: Album) => {
-    setActiveTrack({
-      title: trackName,
-      artist: album.artist,
-      albumId: album.id
-    });
-    setIsPlaying(true);
-    setPlayerProgress(0);
+    const wasPlaying = isPlaying && activeTrack?.title === trackName && activeTrack?.albumId === album.id;
+    
+    if (wasPlaying) {
+      // Toggle: pause if same track is playing
+      setIsPlaying(false);
+    } else {
+      // Start or resume different track
+      setActiveTrack({
+        title: trackName,
+        artist: album.artist,
+        albumId: album.id
+      });
+      setIsPlaying(true);
+      setPlayerProgress(0);
+    }
   };
 
   // Log downloads
@@ -445,40 +483,58 @@ export default function App() {
     setPlaylists(playlists.filter(p => p.id !== playlistId));
   };
 
-  // Custom Album Creator
+  // Custom Album Creator with validation
   const handleCreateCustomAlbum = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newAlbumTitle.trim() || !newAlbumArtist.trim()) return;
+    
+    const titleTrimmed = newAlbumTitle.trim();
+    const artistTrimmed = newAlbumArtist.trim();
+    
+    if (!titleTrimmed || !artistTrimmed) {
+      alert("Por favor, preencha o título e o artista do álbum!");
+      return;
+    }
 
-    // Parse tracklist lines
+    // Parse tracklist lines - more robust parsing
     const parsedTracks = newAlbumTracks
       .split("\n")
       .map(line => line.trim())
       .filter(line => line.length > 0)
       .map((line, idx) => {
         // Ensure standard index numbering if not present
-        if (/^\d/.test(line)) return line;
+        if (/^\d+/.test(line)) return line;
         const trackNum = (idx + 1).toString().padStart(2, '0');
         return `${trackNum}. ${line}`;
       });
 
+    // Validate that we have at least one track
+    if (parsedTracks.length === 0) {
+      alert("Por favor, adicione pelo menos uma faixa!");
+      return;
+    }
+
+    // Validate download links - at least one valid link recommended but not required
+    const validLinks = newAlbumLinks.filter(link => link.url.trim() && link.label.trim());
+
     const newAlbum: Album = {
       id: `custom-${Math.random().toString(36).substring(2, 9)}`,
-      title: newAlbumTitle,
-      artist: newAlbumArtist,
+      title: titleTrimmed,
+      artist: artistTrimmed,
       cover: newAlbumCover.trim() || "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&auto=format&fit=crop&q=60",
       genre: newAlbumGenre,
       year: newAlbumYear,
       quality: newAlbumQuality,
       excerpt: newAlbumExcerpt || "Álbum adicionado pelo usuário na coleção local.",
       description: newAlbumExcerpt || "Álbum customizado adicionado pelo painel criativo do usuário. Desfrute das faixas e links configurados localmente.",
-      tracks: parsedTracks.length > 0 ? parsedTracks : ["01. Faixa Incial", "02. Faixa Secundária"],
-      downloadLinks: newAlbumLinks.filter(link => link.url.trim() !== ""),
+      tracks: parsedTracks,
+      downloadLinks: validLinks,
       isCustom: true
     };
 
     setCustomAlbums([newAlbum, ...customAlbums]);
     setSearchResults([newAlbum, ...searchResults]);
+    
+    console.log("[v0] Novo álbum criado:", newAlbum.id, newAlbum.title);
     
     // Reset form
     setNewAlbumTitle("");
