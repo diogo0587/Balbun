@@ -1,0 +1,6 @@
+{
+  "name": "BAlbums Portal",
+  "description": "BAlbums Search Portal with Proxy integration, local offline search capabilities, user custom albums, and playlist management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
