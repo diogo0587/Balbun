@@ -766,10 +766,10 @@ export default function App() {
 
                   {/* WARNING OR PROXY STATUS */}
                   {searchError && (
-                    <div className="bg-amber-950/20 border border-amber-800/60 p-3.5 rounded-xl flex items-start space-x-2 text-amber-300 text-xs leading-relaxed animate-fadeIn">
-                      <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div className="bg-warn/15 border border-warn/40 p-3.5 rounded-lg flex items-start space-x-2 text-warn text-xs leading-relaxed fadeup">
+                      <Info className="w-4 h-4 shrink-0 mt-0.5" />
                       <div className="flex-1">
-                        <span className="font-semibold text-amber-200">Aviso: </span>
+                        <span className="font-semibold">Aviso: </span>
                         {searchError}
                       </div>
                     </div>
@@ -778,16 +778,16 @@ export default function App() {
               </div>
 
               {/* FILTERS */}
-              <div className="flex flex-wrap items-center gap-3 bg-gray-950/50 p-4 rounded-xl border border-gray-850">
-                <span className="text-xs text-gray-500 font-semibold uppercase tracking-wider">Filtros Rápidos:</span>
+              <div className="flex flex-wrap items-center gap-3 bg-bg-soft/50 p-4 rounded-lg border border-line">
+                <span className="text-xs text-text-mute font-semibold uppercase tracking-wider">Filtros:</span>
                 
                 {/* GENRE FILTER */}
                 <div className="flex items-center space-x-1.5 text-xs">
-                  <span className="text-gray-400">Gênero:</span>
+                  <span className="text-text-soft">Gênero:</span>
                   <select 
                     value={selectedGenre} 
                     onChange={(e) => setSelectedGenre(e.target.value)}
-                    className="bg-[#161b22] border border-gray-850 rounded-lg p-1 text-gray-200 focus:outline-none"
+                    className="input p-1 bg-bg-card text-text text-xs"
                   >
                     {allGenres.map(g => <option key={g} value={g}>{g}</option>)}
                   </select>
@@ -795,19 +795,19 @@ export default function App() {
 
                 {/* YEAR FILTER */}
                 <div className="flex items-center space-x-1.5 text-xs">
-                  <span className="text-gray-400">Ano:</span>
+                  <span className="text-text-soft">Ano:</span>
                   <select 
                     value={selectedYear} 
                     onChange={(e) => setSelectedYear(e.target.value)}
-                    className="bg-[#161b22] border border-gray-850 rounded-lg p-1 text-gray-200 focus:outline-none"
+                    className="input p-1 bg-bg-card text-text text-xs"
                   >
                     {allYears.map(y => <option key={y} value={y}>{y}</option>)}
                   </select>
                 </div>
 
                 <div className="flex-1"></div>
-                <div className="text-xs text-gray-500 font-mono">
-                  Mostrando {filteredAlbums.length} de {searchResults.length} resultados
+                <div className="text-xs text-text-mute mono">
+                  {filteredAlbums.length} de {searchResults.length}
                 </div>
               </div>
 
