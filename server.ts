@@ -22,20 +22,20 @@ app.get("/api/search", async (req, res) => {
   }
 
   const cleanQuery = query.trim();
-  console.log(`[Proxy Search] Querying balbums.st for: "${cleanQuery}"`);
   
   try {
-    // Attempt to fetch from balbums.st
-    const searchUrl = `https://balbums.st/?s=${encodeURIComponent(cleanQuery)}`;
+    // Attempt to fetch from balbums.st - usando novo formato de busca
+    const searchUrl = `https://balbums.st/?search=${encodeURIComponent(cleanQuery)}&mode=broad&per=20`;
     
     const response = await fetch(searchUrl, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Referer": "https://balbums.st/"
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://balbums.st/",
+        "Cache-Control": "no-cache"
       },
-      signal: AbortSignal.timeout(6000) // 6 second timeout
+      signal: AbortSignal.timeout(8000)
     });
 
     if (!response.ok) {
@@ -59,86 +59,47 @@ app.get("/api/search", async (req, res) => {
       });
     }
 
-    // Parse WordPress posts
+    // Parse balbums.st search results - Nova estrutura
     const results: any[] = [];
+    const seenUrls = new Set<string>();
+
+    // Padrão encontrado em balbums.st/bunkr.cr:
+    // <a href="https://bunkr.cr/a/..." class="card ...">
+    //   <div>...
+    //     <img ... alt="TÍTULO DO ÁLBUM" class="thumb-img..." src="...">
+    //   </div>
+    // </a>
     
-    // Regex for articles
-    const articleRegex = /<article[^>]*>([\s\S]*?)<\/article>/gi;
+    const cardRegex = /<a\s+href="([^"]+)"[^>]*class="[^"]*card[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
     let match;
-    let count = 0;
-
-    while ((match = articleRegex.exec(html)) !== null && count < 15) {
-      const articleHtml = match[1];
+    
+    while ((match = cardRegex.exec(html)) !== null && results.length < 20) {
+      const href = match[1];
+      const cardContent = match[2];
       
-      // Extract URL and Title
-      const linkMatch = articleHtml.match(/<h2[^>]*class="[^"]*entry-title[^"]*"[^>]*>\s*<a\s+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i) ||
-                        articleHtml.match(/<a\s+href="([^"]+)"[^>]*rel="bookmark"[^>]*>([\s\S]*?)<\/a>/i) ||
-                        articleHtml.match(/href="([^"]+)"[^>]*>([^<]+)<\/a>/i);
+      if (seenUrls.has(href)) continue;
       
-      if (!linkMatch) continue;
+      // Extrair título do atributo alt da imagem (mais confiável)
+      const imgMatch = cardContent.match(/<img[^>]+alt="([^"]+)"[^>]*class="[^"]*thumb-img[^"]*"[^>]*(?:src="([^"]+)")?/i);
       
-      const url = linkMatch[1];
-      let title = linkMatch[2].replace(/<[^>]+>/g, "").trim();
+      if (!imgMatch) continue; // Pular se não encontrar imagem com alt
       
-      // Decode common HTML entities
+      let title = imgMatch[1].trim();
+      const cover = imgMatch[2] || null;
+      
+      if (!title || title.length < 3) continue; // Pular títulos muito curtos
+      
+      seenUrls.add(href);
       title = decodeHtmlEntities(title);
-
-      // Extract image
-      const imgMatch = articleHtml.match(/<img[^>]+src="([^"]+)"/i) || 
-                       articleHtml.match(/<img[^>]+data-src="([^"]+)"/i);
-      const cover = imgMatch ? imgMatch[1] : null;
-
-      // Extract excerpt
-      const excerptMatch = articleHtml.match(/<div class="entry-summary">([\s\S]*?)<\/div>/i) ||
-                           articleHtml.match(/<div class="post-content">([\s\S]*?)<\/div>/i) ||
-                           articleHtml.match(/<p>([\s\S]*?)<\/p>/i);
-      let excerpt = excerptMatch ? excerptMatch[1].replace(/<[^>]+>/g, "").trim() : "";
-      excerpt = decodeHtmlEntities(excerpt);
-
+      
       results.push({
         title,
-        url,
+        url: href,
         cover,
-        excerpt: excerpt.substring(0, 160) + (excerpt.length > 160 ? "..." : "")
+        excerpt: "Clique para explorar faixas e links de download."
       });
-      count++;
     }
 
-    // If we couldn't parse using <article> tags, try general search match fallback
-    if (results.length === 0) {
-      const generalLinkRegex = /<a\s+href="(https?:\/\/balbums\.st\/[a-zA-Z0-9-]+\/?)"[^>]*>([\s\S]*?)<\/a>/gi;
-      let genMatch;
-      const seenUrls = new Set<string>();
-      
-      while ((genMatch = generalLinkRegex.exec(html)) !== null && results.length < 10) {
-        const url = genMatch[1];
-        let title = genMatch[2].replace(/<[^>]+>/g, "").trim();
-        
-        // Skip administrative / structural links
-        if (
-          seenUrls.has(url) || 
-          url.includes("/category/") || 
-          url.includes("/tag/") || 
-          url.includes("/author/") || 
-          url.includes("/page/") ||
-          title.length < 4 || 
-          title.toLowerCase().includes("contact") ||
-          title.toLowerCase().includes("about")
-        ) {
-          continue;
-        }
-
-        seenUrls.add(url);
-        results.push({
-          title: decodeHtmlEntities(title),
-          url,
-          cover: null,
-          excerpt: "Álbum encontrado no balbums.st. Clique para ver detalhes e faixas."
-        });
-      }
-    }
-
-    console.log(`[Proxy Search] Found ${results.length} results on balbums.st`);
     return res.json({
       success: true,
       results
@@ -165,11 +126,16 @@ app.get("/api/album", async (req, res) => {
     });
   }
 
-  // Security check: only allow proxying balbums.st urls
+  // Security check: only allow proxying balbums.st or bunkr.cr urls
   const cleanUrl = albumUrl.trim();
-  if (!cleanUrl.startsWith("https://balbums.st/") && !cleanUrl.startsWith("http://balbums.st/")) {
+  if (!cleanUrl.startsWith("https://balbums.st/") && 
+      !cleanUrl.startsWith("http://balbums.st/") &&
+      !cleanUrl.startsWith("https://bunkr.cr/") &&
+      !cleanUrl.startsWith("http://bunkr.cr/") &&
+      !cleanUrl.startsWith("https://bunkr.su/") &&
+      !cleanUrl.startsWith("http://bunkr.su/")) {
     return res.status(400).json({ 
-      error: "Invalid domain. Only balbums.st is supported.",
+      error: "Invalid domain. Only balbums/bunkr domains are supported.",
       success: false 
     });
   }
